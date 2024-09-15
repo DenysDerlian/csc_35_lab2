@@ -24,6 +24,7 @@ This repository contains a simple client-server implementation in C++ using sock
     ```
 
 - **From here on, you have two options:** 
+  
     2.1. **Compile the server and client code and run in multiple terminals**:
       ```sh
       g++ -o server server.cpp -lpthread
