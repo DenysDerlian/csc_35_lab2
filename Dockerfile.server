@@ -1,0 +1,24 @@
+# Use an official GCC runtime as a parent image
+FROM gcc:latest
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Copy the current directory contents into the container at /usr/src/app
+COPY server.cpp .
+COPY filesystem/ .
+
+# Install necessary packages
+RUN apt-get update && apt-get install -y \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Compile the server code
+RUN g++ -o server server.cpp -lpthread
+
+# Make port 3535 available to the world outside this container
+EXPOSE 3535
+
+# Run the server program
+CMD ["./server"]

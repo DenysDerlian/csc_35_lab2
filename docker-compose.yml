@@ -1,0 +1,34 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: server
+    ports:
+      - "3535:3535"
+    networks:
+      - mynetwork
+
+  client1:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: client1
+    depends_on:
+      - server
+    networks:
+      - mynetwork
+
+  client2:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: client2
+    depends_on:
+      - server
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge
