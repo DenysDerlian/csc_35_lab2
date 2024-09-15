@@ -20,8 +20,7 @@ This repository contains a simple client-server implementation in C++ using sock
 
 1. **Clone the repository**:
     ```sh
-    git clone <span style="color:red">PUT TEXT</span>.
-    cd client-server
+    git clone https://github.com/DenysDerlian/csc_35_lab2.git
     ```
 
 - **From here on, you have two options:** 
