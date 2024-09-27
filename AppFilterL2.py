@@ -37,6 +37,11 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.add_flow(datapath, 1, match_h1_to_h2, actions)
         self.add_flow(datapath, 1, match_h2_to_h1, actions)
 
+        # Add a default drop rule
+        match_drop = parser.OFPMatch()
+        actions_drop = []
+        self.add_flow(datapath, 0, match_drop, actions_drop)
+
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
