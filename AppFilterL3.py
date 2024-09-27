@@ -61,6 +61,10 @@ class SimpleSwitch13(app_manager.RyuApp):
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
             # ignore lldp packet
             return
+
+        src_ip = None
+        dst_ip = None
+
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
             # Allow ARP packets
             out_port = ofproto.OFPP_FLOOD
@@ -88,7 +92,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, src_ip, dst_ip, in_port)
+        self.logger.info("packet in %s %s %s %s", dpid, eth.src, eth.dst, in_port)
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][eth.src] = in_port
