@@ -77,7 +77,10 @@ class SimpleSwitch13(app_manager.RyuApp):
             self.logger.info("Dropping packet to h3")
             return
 
-        if (src == self.h1_mac and dst == self.h2_mac and not self.h1_to_h2_sent):
+        if dst == "ff:ff:ff:ff:ff:ff":
+            # Allow broadcast packets
+            out_port = ofproto.OFPP_FLOOD
+        elif (src == self.h1_mac and dst == self.h2_mac and not self.h1_to_h2_sent):
             out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
             self.h1_to_h2_sent = True
         elif (src == self.h2_mac and dst == self.h1_mac and not self.h2_to_h1_sent):
