@@ -6,6 +6,8 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
+import struct
+import socket
 
 
 class SimpleSwitch13(app_manager.RyuApp):
@@ -66,9 +68,12 @@ class SimpleSwitch13(app_manager.RyuApp):
             # Ignore non-IP packets
             return
 
+        # Manually parse the IP header
         ip_header = pkt.protocols[1]
-        src_ip = ip_header.src
-        dst_ip = ip_header.dst
+        ip_header_data = msg.data[14:34]  # IP header is 20 bytes long, starting after the Ethernet header
+        ip_header_unpacked = struct.unpack('!BBHHHBBH4s4s', ip_header_data)
+        src_ip = socket.inet_ntoa(ip_header_unpacked[8])
+        dst_ip = socket.inet_ntoa(ip_header_unpacked[9])
 
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
