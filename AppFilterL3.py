@@ -1,3 +1,17 @@
+# Copyright (C) 2011 Nippon Telegraph and Telephone Corporation.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# você não pode usar este arquivo exceto em conformidade com a Licença.
+# Você pode obter uma cópia da Licença em
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# A menos que exigido por lei aplicável ou acordado por escrito, o software
+# distribuído sob a Licença é distribuído "COMO ESTÁ", SEM GARANTIAS
+# OU CONDIÇÕES DE QUALQUER TIPO, expressas ou implícitas.
+# Veja a Licença para o idioma específico que rege permissões e
+# limitações sob a Licença.
+
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
@@ -6,21 +20,20 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
-import struct
-import socket
+from ryu.lib.packet import ipv4
 
-
-class SimpleSwitch13(app_manager.RyuApp):
+class L3Filter(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
+    # Definindo os endereços IP de h1 e h2
+    ALLOWED_IP_PAIRS = {
+        ('10.0.0.1', '10.0.0.2'),  # h1 <-> h2
+        ('10.0.0.2', '10.0.0.1')   # h2 <-> h1
+    }
+
     def __init__(self, *args, **kwargs):
-        super(SimpleSwitch13, self).__init__(*args, **kwargs)
+        super(L3Filter, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
-        self.h1_ip = "10.0.0.1"
-        self.h2_ip = "10.0.0.2"
-        self.h3_ip = "10.0.0.3"
-        self.h1_to_h2_sent = False
-        self.h2_to_h1_sent = False
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -28,10 +41,9 @@ class SimpleSwitch13(app_manager.RyuApp):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        # install table-miss flow entry
+        # Instalar entrada de fluxo table-miss que descarta pacotes por padrão
         match = parser.OFPMatch()
-        actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
-                                          ofproto.OFPCML_NO_BUFFER)]
+        actions = []  # Sem ações significa que o pacote será descartado
         self.add_flow(datapath, 0, match, actions)
 
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
@@ -61,60 +73,46 @@ class SimpleSwitch13(app_manager.RyuApp):
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
-            # ignore lldp packet
+            # Ignorar pacotes LLDP
             return
 
-        if eth.ethertype != ether_types.ETH_TYPE_IP:
-            # Ignore non-IP packets
-            return
+        ip_pkt = pkt.get_protocol(ipv4.ipv4)
+        if ip_pkt:
+            src_ip = ip_pkt.src
+            dst_ip = ip_pkt.dst
 
-        # Manually parse the IP header
-        ip_header = pkt.protocols[1]
-        ip_header_data = msg.data[14:34]  # IP header is 20 bytes long, starting after the Ethernet header
-        ip_header_unpacked = struct.unpack('!BBHHHBBH4s4s', ip_header_data)
-        src_ip = socket.inet_ntoa(ip_header_unpacked[8])
-        dst_ip = socket.inet_ntoa(ip_header_unpacked[9])
+            # Verificar se o par de IPs está na lista de permitidos
+            if (src_ip, dst_ip) in self.ALLOWED_IP_PAIRS:
+                self.logger.info("Permitido: %s -> %s", src_ip, dst_ip)
 
-        dpid = format(datapath.id, "d").zfill(16)
-        self.mac_to_port.setdefault(dpid, {})
+                # Aprender o mapeamento MAC -> Porta
+                src = eth.src
+                dst = eth.dst
+                dpid = format(datapath.id, "d").zfill(16)
+                self.mac_to_port.setdefault(dpid, {})
+                self.mac_to_port[dpid][src] = in_port
 
-        self.logger.info("packet in %s %s %s %s", dpid, src_ip, dst_ip, in_port)
+                if dst in self.mac_to_port[dpid]:
+                    out_port = self.mac_to_port[dpid][dst]
+                else:
+                    out_port = ofproto.OFPP_FLOOD
 
-        # learn a mac address to avoid FLOOD next time.
-        self.mac_to_port[dpid][eth.src] = in_port
+                actions = [parser.OFPActionOutput(out_port)]
 
-        if dst_ip == self.h3_ip:
-            # Drop packets to h3
-            self.logger.info("Dropping packet to h3")
-            return
-
-        if dst_ip == "255.255.255.255":
-            # Allow broadcast packets
-            out_port = ofproto.OFPP_FLOOD
-        elif (src_ip == self.h1_ip and dst_ip == self.h2_ip and not self.h1_to_h2_sent):
-            out_port = self.mac_to_port[dpid].get(eth.dst, ofproto.OFPP_FLOOD)
-            self.h1_to_h2_sent = True
-        elif (src_ip == self.h2_ip and dst_ip == self.h1_ip and not self.h2_to_h1_sent):
-            out_port = self.mac_to_port[dpid].get(eth.dst, ofproto.OFPP_FLOOD)
-            self.h2_to_h1_sent = True
-        else:
-            self.logger.info("Dropping packet not allowed by rules")
-            return
-
-        actions = [parser.OFPActionOutput(out_port)]
-
-        # install a flow to avoid packet_in next time
-        if out_port != ofproto.OFPP_FLOOD:
-            match = parser.OFPMatch(in_port=in_port, eth_dst=eth.dst, eth_src=eth.src, ipv4_src=src_ip, ipv4_dst=dst_ip)
-            if msg.buffer_id != ofproto.OFP_NO_BUFFER:
-                self.add_flow(datapath, 1, match, actions, msg.buffer_id)
+                # Instalar fluxo para permitir tráfego futuro entre h1 e h2
+                match = parser.OFPMatch(in_port=in_port, eth_type=ether_types.ETH_TYPE_IP,
+                                        ipv4_src=src_ip, ipv4_dst=dst_ip)
+                self.add_flow(datapath, 1, match, actions)
+                
+                # Enviar o pacote para a porta de saída
+                out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
+                                          in_port=in_port, actions=actions, data=msg.data)
+                datapath.send_msg(out)
                 return
             else:
-                self.add_flow(datapath, 1, match, actions)
-        data = None
-        if msg.buffer_id == ofproto.OFP_NO_BUFFER:
-            data = msg.data
-
-        out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
-                                  in_port=in_port, actions=actions, data=data)
-        datapath.send_msg(out)
+                self.logger.info("Bloqueado: %s -> %s", src_ip, dst_ip)
+                # Não instalar fluxo, descartando o pacote
+                return
+        else:
+            # Para pacotes que não são IP, descartar
+            return
