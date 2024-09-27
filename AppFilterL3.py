@@ -6,7 +6,6 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
-from ryu.lib.packet import ipv4
 
 
 class SimpleSwitch13(app_manager.RyuApp):
@@ -63,13 +62,13 @@ class SimpleSwitch13(app_manager.RyuApp):
             # ignore lldp packet
             return
 
-        ip_pkt = pkt.get_protocol(ipv4.ipv4)
-        if not ip_pkt:
+        if eth.ethertype != ether_types.ETH_TYPE_IP:
             # Ignore non-IP packets
             return
 
-        dst_ip = ip_pkt.dst
-        src_ip = ip_pkt.src
+        ip_header = pkt.protocols[1]
+        src_ip = ip_header.src
+        dst_ip = ip_header.dst
 
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
