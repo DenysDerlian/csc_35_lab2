@@ -6,6 +6,7 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ipv4
+from ryu.lib.packet import tcp
 from ryu.lib.packet import ether_types
 
 
@@ -18,8 +19,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.h1_ip = "10.0.0.1"
         self.h2_ip = "10.0.0.2"
         self.h3_ip = "10.0.0.3"
-        self.h1_to_h2_sent = False
-        self.h2_to_h1_sent = False
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -70,25 +69,26 @@ class SimpleSwitch13(app_manager.RyuApp):
             src_ip = ip_pkt.src
             dst_ip = ip_pkt.dst
 
-            if dst_ip == self.h3_ip:
-                # Drop packets to h3
-                self.logger.info("Dropping packet to h3")
+            if dst_ip == self.h3_ip or src_ip == self.h3_ip:
+                # Allow HTTP traffic to and from h3
+                tcp_pkt = pkt.get_protocols(tcp.tcp)[0]
+                if tcp_pkt.dst_port == 80 or tcp_pkt.src_port == 80:
+                    out_port = ofproto.OFPP_FLOOD
+                else:
+                    self.logger.info("Dropping non-HTTP packet to/from h3")
+                    return
+            elif (src_ip == self.h1_ip and dst_ip == self.h2_ip) or (src_ip == self.h2_ip and dst_ip == self.h1_ip):
+                # Drop traffic between h1 and h2
+                self.logger.info("Dropping packet between h1 and h2")
                 return
-
-            if (src_ip == self.h1_ip and dst_ip == self.h2_ip and not self.h1_to_h2_sent):
-                out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
-                self.h1_to_h2_sent = True
-            elif (src_ip == self.h2_ip and dst_ip == self.h1_ip and not self.h2_to_h1_sent):
-                out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
-                self.h2_to_h1_sent = True
             else:
-                self.logger.info("Dropping packet not allowed by rules")
-                return
+                # Allow other traffic
+                out_port = ofproto.OFPP_FLOOD
 
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
+        self.logger.info("packet in %s %s %s %s", dpid, src_ip, dst_ip, in_port)
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][eth.src] = in_port
