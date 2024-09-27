@@ -14,8 +14,11 @@ class SimpleSwitch13(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
-        self.h1_mac = '00:00:00:00:00:01'
-        self.h2_mac = '00:00:00:00:00:02'
+        self.h1_mac = "00:00:00:00:00:01"
+        self.h2_mac = "00:00:00:00:00:02"
+        self.h3_mac = "00:00:00:00:00:03"
+        self.h1_to_h2_sent = False
+        self.h2_to_h1_sent = False
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -28,19 +31,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
-
-        # Add flow rules to allow traffic between h1 and h2
-        match_h1_to_h2 = parser.OFPMatch(eth_src=self.h1_mac, eth_dst=self.h2_mac)
-        match_h2_to_h1 = parser.OFPMatch(eth_src=self.h2_mac, eth_dst=self.h1_mac)
-        actions = [parser.OFPActionOutput(ofproto.OFPP_NORMAL)]
-
-        self.add_flow(datapath, 1, match_h1_to_h2, actions)
-        self.add_flow(datapath, 1, match_h2_to_h1, actions)
-
-        # Add a default drop rule
-        match_drop = parser.OFPMatch()
-        actions_drop = []
-        self.add_flow(datapath, 0, match_drop, actions_drop)
 
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
         ofproto = datapath.ofproto
@@ -59,9 +49,6 @@ class SimpleSwitch13(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
-        if ev.msg.msg_len < ev.msg.total_len:
-            self.logger.debug("packet truncated: only %s of %s bytes",
-                              ev.msg.msg_len, ev.msg.total_len)
         msg = ev.msg
         datapath = msg.datapath
         ofproto = datapath.ofproto
@@ -85,10 +72,20 @@ class SimpleSwitch13(app_manager.RyuApp):
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
 
-        if dst in self.mac_to_port[dpid]:
-            out_port = self.mac_to_port[dpid][dst]
+        if dst == self.h3_mac:
+            # Drop packets to h3
+            self.logger.info("Dropping packet to h3")
+            return
+
+        if (src == self.h1_mac and dst == self.h2_mac and not self.h1_to_h2_sent):
+            out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
+            self.h1_to_h2_sent = True
+        elif (src == self.h2_mac and dst == self.h1_mac and not self.h2_to_h1_sent):
+            out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
+            self.h2_to_h1_sent = True
         else:
-            out_port = ofproto.OFPP_FLOOD
+            self.logger.info("Dropping packet not allowed by rules")
+            return
 
         actions = [parser.OFPActionOutput(out_port)]
 
