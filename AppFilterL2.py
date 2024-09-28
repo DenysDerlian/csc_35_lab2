@@ -7,12 +7,12 @@ from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 
-
-class SimpleSwitch13(app_manager.RyuApp):
+# Define the main application class
+class L2Filter(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
-        super(SimpleSwitch13, self).__init__(*args, **kwargs)
+        super(L2Filter, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
         self.h1_mac = "00:00:00:00:00:01"
         self.h2_mac = "00:00:00:00:00:02"
@@ -20,18 +20,20 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.h1_to_h2_sent = False
         self.h2_to_h1_sent = False
 
+    # Event handler for switch features
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         datapath = ev.msg.datapath
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        # install table-miss flow entry
+        # Install table-miss flow entry
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
         self.add_flow(datapath, 0, match, actions)
 
+    # Function to add a flow entry
     def add_flow(self, datapath, priority, match, actions, buffer_id=None):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
@@ -47,6 +49,7 @@ class SimpleSwitch13(app_manager.RyuApp):
                                     match=match, instructions=inst)
         datapath.send_msg(mod)
 
+    # Event handler for packet-in events
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
         msg = ev.msg
@@ -58,8 +61,8 @@ class SimpleSwitch13(app_manager.RyuApp):
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
+        # Ignore LLDP packets
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
-            # ignore lldp packet
             return
         dst = eth.dst
         src = eth.src
@@ -69,20 +72,22 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
-        # learn a mac address to avoid FLOOD next time.
+        # Learn a MAC address to avoid FLOOD next time
         self.mac_to_port[dpid][src] = in_port
 
+        # Drop packets destined to h3
         if dst == self.h3_mac:
-            # Drop packets to h3
             self.logger.info("Dropping packet to h3")
             return
 
+        # Allow broadcast packets
         if dst == "ff:ff:ff:ff:ff:ff":
-            # Allow broadcast packets
             out_port = ofproto.OFPP_FLOOD
+        # Allow packets from h1 to h2 only once
         elif (src == self.h1_mac and dst == self.h2_mac and not self.h1_to_h2_sent):
             out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
             self.h1_to_h2_sent = True
+        # Allow packets from h2 to h1 only once
         elif (src == self.h2_mac and dst == self.h1_mac and not self.h2_to_h1_sent):
             out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
             self.h2_to_h1_sent = True
@@ -92,7 +97,7 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         actions = [parser.OFPActionOutput(out_port)]
 
-        # install a flow to avoid packet_in next time
+        # Install a flow to avoid packet_in next time
         if out_port != ofproto.OFPP_FLOOD:
             match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
