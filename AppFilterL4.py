@@ -2,16 +2,16 @@
 # Copyright (C)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# Você não pode usar este arquivo exceto em conformidade com a Licença.
-# Você pode obter uma cópia da Licença em
+# You may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
-# A menos que exigido por lei aplicável ou acordado por escrito, o software
-# distribuído sob a Licença é distribuído "COMO ESTÁ", SEM GARANTIAS
-# OU CONDIÇÕES DE QUALQUER TIPO, expressas ou implícitas.
-# Veja a Licença para o idioma específico que rege permissões e
-# limitações sob a Licença.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
@@ -24,19 +24,19 @@ from ryu.lib.packet import ether_types
 from ryu.lib.packet import ipv4
 from ryu.lib.packet import tcp
 
-class Layer4Filter(app_manager.RyuApp):
+class L4Filter(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
-    # Definindo os pares de IP permitidos e a porta
+    # Define allowed IP pairs and port
     ALLOWED_TRAFFIC = {
         ('10.0.0.1', '10.0.0.3', 80),  # h1 -> h3 (HTTP)
         ('10.0.0.2', '10.0.0.3', 80),  # h2 -> h3 (HTTP)
-        ('10.0.0.3', '10.0.0.1', 80),  # h3 -> h1 (Resposta HTTP)
-        ('10.0.0.3', '10.0.0.2', 80),  # h3 -> h2 (Resposta HTTP)
+        ('10.0.0.3', '10.0.0.1', 80),  # h3 -> h1 (HTTP Response)
+        ('10.0.0.3', '10.0.0.2', 80),  # h3 -> h2 (HTTP Response)
     }
 
     def __init__(self, *args, **kwargs):
-        super(Layer4Filter, self).__init__(*args, **kwargs)
+        super(L4Filter, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -48,12 +48,12 @@ class Layer4Filter(app_manager.RyuApp):
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
-        # Instalar fluxo para permitir pacotes ARP e flood
+        # Install flow to allow ARP packets and flood them
         match_arp = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_ARP)
         actions_arp = [parser.OFPActionOutput(ofproto.OFPP_FLOOD)]
         self.add_flow(datapath, 100, match_arp, actions_arp)
 
-        # Instalar fluxo table-miss para pacotes que não são ARP (Enviar para o controlador)
+        # Install table-miss flow entry for non-ARP packets (Send to controller)
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
@@ -86,10 +86,10 @@ class Layer4Filter(app_manager.RyuApp):
         eth = pkt.get_protocols(ethernet.ethernet)[0]
 
         if eth.ethertype == ether_types.ETH_TYPE_LLDP:
-            # Ignorar pacotes LLDP
+            # Ignore LLDP packets
             return
 
-        # Manipular pacotes IPv4
+        # Handle IPv4 packets
         if eth.ethertype == ether_types.ETH_TYPE_IP:
             ip_pkt = pkt.get_protocol(ipv4.ipv4)
             if ip_pkt:
@@ -97,20 +97,20 @@ class Layer4Filter(app_manager.RyuApp):
                 dst_ip = ip_pkt.dst
                 ip_proto = ip_pkt.proto
 
-                # Manipular apenas pacotes TCP
-                if ip_proto == 6:  # 6 é o protocolo TCP
+                # Handle only TCP packets
+                if ip_proto == 6:  # 6 is the protocol number for TCP
                     tcp_pkt = pkt.get_protocol(tcp.tcp)
                     if tcp_pkt:
                         src_port = tcp_pkt.src_port
                         dst_port = tcp_pkt.dst_port
 
-                        # Verificar se o tráfego está na lista permitida
+                        # Check if the traffic is allowed
                         if (src_ip, dst_ip, dst_port) in self.ALLOWED_TRAFFIC or \
                            (src_ip, dst_ip, src_port) in self.ALLOWED_TRAFFIC:
-                            self.logger.info("Permitido: %s:%s -> %s:%s",
+                            self.logger.info("Allowed: %s:%s -> %s:%s",
                                              src_ip, src_port, dst_ip, dst_port)
 
-                            # Aprender o mapeamento MAC -> Porta
+                            # Learn the MAC to port mapping
                             src_mac = eth.src
                             dst_mac = eth.dst
                             dpid = datapath.id
@@ -124,7 +124,7 @@ class Layer4Filter(app_manager.RyuApp):
 
                             actions = [parser.OFPActionOutput(out_port)]
 
-                            # Instalar fluxo para permitir tráfego futuro
+                            # Install flow to allow future traffic
                             match = parser.OFPMatch(
                                 in_port=in_port,
                                 eth_type=ether_types.ETH_TYPE_IP,
@@ -135,7 +135,7 @@ class Layer4Filter(app_manager.RyuApp):
                             )
                             self.add_flow(datapath, 1, match, actions, msg.buffer_id)
 
-                            # Enviar o pacote para a porta de saída
+                            # Send the packet out to the output port
                             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
                                 return
                             data = msg.data
@@ -149,11 +149,11 @@ class Layer4Filter(app_manager.RyuApp):
                             )
                             datapath.send_msg(out)
                             return
-                # Bloquear tráfego ICMP (pings) ou outros protocolos
-                self.logger.info("Bloqueado: %s:%s -> %s:%s (Protocolo %s)", 
+                # Block ICMP (ping) traffic or other protocols
+                self.logger.info("Blocked: %s:%s -> %s:%s (Protocol %s)", 
                                  src_ip, ip_proto, dst_ip, 'N/A', ip_proto)
                 return
 
-        # Bloquear pacotes que não são IP
-        self.logger.info("Pacote não IP descartado: eth_type=0x%04x", eth.ethertype)
+        # Block non-IP packets
+        self.logger.info("Non-IP packet dropped: eth_type=0x%04x", eth.ethertype)
         return
